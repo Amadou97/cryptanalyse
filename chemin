@@ -1,0 +1,93 @@
+Zamanski, une flèche rouge indique :
+``ZAMANSKI_SUBBASEMENT_DSI_DATACENTER_2''.
+Juste en dessous figure la mention : ``censory engine''.
+
+REVERSE-ENGINEERING DU CENSORY ENGINE
+=====================================
+
+Il apparaît que les sensations extérieures qui arrivent à un programme RML sont
+découpées en paquets et chiffrées.  En fonction du niveau d'accréditation
+administratif, le censory engine envoie une clef de déchiffrement pour chaque
+paquet...  ou pas.  Le refus d'envoyer la clef équivaut de fait à la censure.
+Le découpage en paquet permet de censurer *partiellement* des descriptions.  On
+ne sait pas, à ce stade, comment le chiffrement est effectué, et on a toutes les
+raison de supposer qu'il est sûr.
+
+Chaque paquet de sensations extérieures possède un "handle" qui est en fait une
+chaine de bits qu'on ne peut pas examiner.  Par contre, nous savons qu'ils font
+tous la même taille, c'est-à-dire 128 bits.
+
+Nous avons déterminé que les clefs de déchiffrement pour chaque paquet ne sont
+pas générées aléatoirement, mais sont en fait calculées à partir du "handle" de
+la façon suivante :
+
+        decryption_key(handle) := E(K, handle),
+
+où E est un block-cipher qui opère sur des blocs de 128 bits, et K est une clef
+inconnue de 64 bits.
+
+Nous avons supposé que les "handles" étaient facilement prédictibles (c.a.d. les
+entiers 0, 1, 2, ...) mais ça s'est avéré inexact.
+
+En creusant un peu, on s'est rendu compte que le block-cipher en question est
+faible.  Il s'agit d'un réseau de Feistel à quatre tours qui fonctionne donc avec
+une clef K de 64 bits, coupée en quatre sous-clefs K0, K1, K2, K3 qui font 16 bits
+chacune.  Le bloc à chiffrer est coupé en deux moitiés, puis les quatre tours ont
+lieu.
+
+        L = plaintext[0:8]
+        R = plaintext[8:16]
+
+        L = L xor F(K0, R)
+        R = R xor F(K1, L)
+        L = L xor F(K2, R)
+        R = R xor F(K3, L)
+
+        ciphertext[0:8] = L
+        ciphertext[8:16] = R
+
+
+La fonction F a l'air tout à fait solide, puisque c'est :
+
+        F(k, x) := SHA256(k || x)     [tronqué aux 64 premiers bits]
+
+
+La bonne nouvelle, c'est qu'avec un peu de social engineering (et la voix de F
+qui est irresistible), nous avons réussi à convaincre un ingénieur de la DSI
+d'aller remplacer la carte qui implante le chiffrement avec la clef K !  On a pu
+lui "emprunter" le dispositif en l'attendant au détour d'un couloir puis en lui
+sautant dessus tous les cinq en même temps.  Il a mis quelques gnons à C et D au
+passage mais il a fini par arrêter de se débattre quand F lui a mordu la main
+pendant que K lui tordait l'autre bras dans le mauvais sens.  On doit pouvoir
+récupérer la clef K de manière purement cryptographique, mais au cas où on
+regarde aussi si on ne pourrait pas s'en sortir plus directement avec des canaux
+auxiliaires.
+
+
+###################################
+---------------BLOC NOTE-------------------------
+#Tableau 1
+C'est le genre de tableau blanc qu'on trouve dans les bureaux de recherche.
+Il y a écrit : CENSORY ENGINE HARDWARE SECURITY.  En dessous, il y a un
+schéma.  C'est une espèce de cocotte-minute contenant une barrette de DRAM,
+un petit CPU et des accéléromètres.  Apparemment, le système est prévu pour
+couper le courant à l'intérieur dès que la cocotte-minute est ouverte ou
+déplacée.  Seul un cable sort de l'ensemble pour interagir avec l'extérieur.
+Une grosse flèche pointe vers la barrette de RAM avec la mention : "SECURE
+ENCLAVE ACCESS KEY".  Il y a aussi quelques mentions manuscrites :
+- CRYPTO: PROUVABLEMENT SÛR (cf.  DV) ---> CANAUX AUXILIAIRES ?
+- POWER LOST --> DATA LOST.  Que faire ?
+- NE PEUT-ON S'EN APPROCHER SANS CETTE SATAN
+
+
+#Tableau 2
+Sur la page du dessus est écrit en gros : COLD-BOOT ATTACK.  En dessous, il y
+a des notes griffonnées à la va-vite :
+  * récupérer azote liquide (LIP6_QI_ROOM)
+  * Ouvrir
+  * Verser azote liquide **rapidement**
+  * Extraire barrette RAM
+  * Utiliser lecteur
+  * Reconstituer clef d'accès à l'enclave sécurisée
+  * ouvrir
+  * attaque physique (au pied-de-biche)
